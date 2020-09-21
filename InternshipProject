@@ -1,0 +1,230 @@
+#importing all necessary libraries
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize , sent_tokenize
+from nltk.stem.porter import PorterStemmer
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.metrics import classification_report , confusion_matrix , accuracy_score
+from sklearn.model_selection import train_test_split
+from wordcloud import WordCloud ,STOPWORDS
+from bs4 import BeautifulSoup
+import re , string , unicodedata
+from string import punctuation
+
+#loading dataset
+df = pd.read_csv("news.csv",encoding='latin-1')
+
+#categorical data to numerical data
+df['category']=df.label.map({'REAL':1 , 'FAKE':0})
+df.head()
+
+#check balanced or not
+sns.set_style("darkgrid")
+sns.countplot(df.category)
+
+#check for duplicate rows
+duplicateRowsDF=df[df.duplicated()]     #no duplicate rows
+print(duplicateRowsDF)
+
+#check for NaN values
+df.isna().sum()  
+
+#know the data
+df.title.count()
+
+df.label.value_counts()
+
+plt.figure(figsize=(12,8))
+sns.set(style="whitegrid",font_scale = 1.2)
+chart = sns.countplot(x = "label",hue ="category",data=df)
+chart.set_xticklabels(chart.get_xticklabels(),rotation=90)
+
+
+#remove redundant features
+df['text']=df['text']+" "+df['title']
+del df['title']
+del df['Unnamed: 0']
+
+#stopwords initialization
+nltk.download('stopwords')
+stop = set(stopwords.words('english'))
+
+#data cleaning
+def strip_html(text):
+    soup = BeautifulSoup( text , "html.parser")
+    return soup.get_text()
+def remove_stopwords (text):        #Removing the stopwords from text
+    final_text = []
+    for i in text.split():
+        if i.strip().lower() not in stop:
+            final_text.append(i.strip())
+    return " ".join(final_text)  #converts list to string
+#Remove the noisy text
+def denoise_text(text):        
+    text = text.lower()
+    text = re.sub('\[.*?\]','',text)   #re is regular expression.   #here anything between square brackets are removed.
+    text = re.sub('[%s]' % re.escape(string.punctuation),'',text)         #punctuations are removed.
+    text = re.sub('\w*\d\w*','',text)        #alphanumeric characters are removed  
+    text = strip_html(text)
+    text = remove_stopwords(text)
+    return text
+
+#Apply function on review column
+df['text'] = df['text'].apply(denoise_text)
+
+#Wordcloud for real text (LABEL -1)
+plt.figure( figsize = (20,20))   #Text that is not Fake
+wc = WordCloud(max_words = 2000, width = 1600 , height = 800, stopwords = STOPWORDS).generate(" ".join(df[df.category == 1].text))
+plt.imshow(wc, interpolation = 'bilinear')
+plt.axis("off")
+plt.show()
+
+#Wordcloud for fake text (LABEL - 0)
+plt.figure( figsize = (20,20))   #Text that is Fake
+wc = WordCloud(max_words = 2000, width = 1600 , height = 800, stopwords = STOPWORDS).generate(" ".join(df[df.category == 0].text))
+plt.imshow(wc, interpolation = 'bilinear')
+plt.axis("off")
+plt.show()
+
+# Number of characters in texts
+fig,(ax1,ax2)=plt.subplots(1,2,figsize=(18,25))
+text_len=df[df['category']==1]['text'].str.len()
+ax1.hist(text_len,color='red')
+ax1.set_title('Original text')
+text_len=df[df['category']==0]['text'].str.len()
+ax2.hist(text_len,color='green')
+ax2.set_title('Fake text')
+fig.suptitle('Characters in texts')
+plt.show()
+
+df['text_len']=df.text.apply(len)
+df[df['category']==1]['text_len'].describe()
+
+df[df['category']==0]['text_len'].describe()
+#on an average original text has 3786 characters in text which is the most common (mean) while around 2942 characters in text are most common in fake text category
+
+# Average word length in a text
+fig,(ax1,ax2)=plt.subplots(1,2,figsize=(20,20))
+word=df[df['category']==1]['text'].str.split().apply(lambda x : [len(i) for i in x])
+sns.distplot(word.map(lambda x: np.mean(x)),ax=ax1,color='red')
+ax1.set_title('Original text')
+word=df[df['category']==0]['text'].str.split().apply(lambda x : [len(i) for i in x])
+sns.distplot(word.map(lambda x: np.mean(x)),ax=ax2,color='green')
+ax2.set_title('Fake text')
+fig.suptitle('Average word length in each text')
+
+# Frequency of words
+from collections import Counter
+words = df[df.category == 1].text.apply(lambda x : [word.lower() for word in x.split()])
+
+real_words = Counter()
+for i in words:
+    real_words.update(i)
+    
+print(real_words.most_common(50))
+
+from collections import Counter
+words = df[df.category == 0].text.apply(lambda x : [word.lower() for word in x.split()])
+
+real_words = Counter()
+for i in words:
+    fake_words.update(i)
+    
+print(fake_words.most_common(50))
+
+# Split the data into training and testing dataset
+X_train , X_test,y_train,y_test = train_test_split(df['text'],df['category'],random_state = 5)
+print(X_train.shape)
+print(X_test.shape)
+print(y_train.shape)
+print(y_test.shape)
+
+# Vectorizing
+from sklearn.feature_extraction.text import CountVectorizer
+cv = CountVectorizer(stop_words = 'english')
+data_cv = cv.fit_transform(df.text)
+data_dtm = pd.DataFrame(data_cv.toarray(),columns = cv.get_feature_names())
+data_dtm.index = df.index
+data_dtm            #document term matrix - dtm     #transforming the whole dataset
+
+
+X_train_dtm = cv.fit_transform(X_train)
+X_train_dtm
+
+X_test_dtm = cv.transform(X_test)
+X_test_dtm
+
+from sklearn.feature_extraction.text import TfidfTransformer
+tfidf_transformer = TfidfTransformer()
+tfidf_transformer.fit(X_train_dtm)
+tfidf_transformer.transform(X_train_dtm)
+#this data is to be fed to the algorithm
+
+# Building and evaluating a model
+
+#import and instantiate a Multinomial Naive Bayes model
+from sklearn.naive_bayes import MultinomialNB
+nb = MultinomialNB()
+
+#train the model using X_train_dtm 
+%time nb.fit(X_train_dtm , y_train)
+
+#make class predictions for X_test_dtm
+y_pred = nb.predict(X_test_dtm)
+
+# calculate accuracy of class predictions 
+from sklearn import metrics
+metrics.accuracy_score(y_test,y_pred)
+
+metrics.confusion_matrix(y_test,y_pred)
+
+# Vectorizing and applying TF-IDF
+from sklearn.linear_model import LogisticRegression
+pipe = Pipeline([('vect', CountVectorizer()),
+                 ('tfidf', TfidfTransformer()),
+                 ('model', LogisticRegression())])
+# Fitting the model
+model = pipe.fit(X_train, y_train)
+# Accuracy
+pred = model.predict(X_test)
+metrics.accuracy_score(y_test,pred)
+metrics.confusion_matrix(y_test,pred)
+
+metrics.accuracy_score(y_test,pred)
+
+
+#trying model models
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.naive_bayes import MultinomialNB, BernoulliNB
+
+def get_prediction(vectorizer,normalizer,classifier,X_train,X_test,y_train,y_test):
+    pipe = Pipeline([('vector',vectorizer),('tfidf',normalizer),('model',classifier)])
+    model = pipe.fit(X_train,y_train)
+    y_pred = model.predict(X_test)
+    print("Accuracy:{}".format(round(accuracy_score(y_test,y_pred)*100,2)))
+    cm = confusion_matrix(y_test,y_pred)
+    print("Confusion Matrix:\n",cm)
+    print("Classification Report:\n",classification_report(y_test,y_pred))
+
+classifiers =[LogisticRegression(),MultinomialNB(),BernoulliNB(),SGDClassifier()]
+for classifier in classifiers:
+    print("\n\n",classifier)
+    get_prediction(CountVectorizer(), TfidfTransformer(),classifier,X_train,X_test,y_train,y_test)
+
+X_test_dtm = cv.transform(X_test)
+X_test_dtm
+
+#this data is to be fed to the algorithm
+from sklearn.feature_extraction.text import TfidfTransformer
+tfidf_transformer = TfidfTransformer()
+tfidf_transformer.fit(X_train_dtm)
+tfidf_transformer.transform(X_train_dtm)
+
+#SGDClassifier has the highest accuracy so SGDClassifier should be the desired ML model for predicting "FAKE" news
